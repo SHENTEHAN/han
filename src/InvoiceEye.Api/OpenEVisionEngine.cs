@@ -53,8 +53,20 @@ public sealed class OpenEVisionEngine : IVisionEngine
         DisposeQuietly(probeGray);
 
         if (_ocrModelPath is null || !File.Exists(_ocrModelPath))
-            _log.LogWarning("找不到 EasyOCR2 模型（Vision:OpenEVision:OcrModel = {Path}），傳統發票的文字辨識會跳過", _ocrModelPath);
+        {
+            // 預設位置沒有模型是 vision/README.md 說明的正常狀態：傳統發票改由使用者輸入。
+            // 只有特別指定了別的路徑卻找不到檔案，才是設定錯誤。
+            var configured = config["OcrModel"];
+            var isDefaultLocation = string.IsNullOrWhiteSpace(configured)
+                || string.Equals(configured.Replace('\\', '/'), DefaultOcrModel, StringComparison.OrdinalIgnoreCase);
+            if (isDefaultLocation)
+                _log.LogInformation("沒有 EasyOCR2 模型（{Path}），傳統發票的號碼與金額改由使用者輸入；放入模型檔後重新啟動即可啟用文字辨識", _ocrModelPath);
+            else
+                _log.LogWarning("找不到設定的 EasyOCR2 模型（Vision:OpenEVision:OcrModel = {Path}），傳統發票的文字辨識會跳過", _ocrModelPath);
+        }
     }
+
+    private const string DefaultOcrModel = "vision/invoice.o2m";
 
     public string Name => "open-evision";
 
