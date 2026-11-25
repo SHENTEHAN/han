@@ -1,9 +1,7 @@
 #if OPEN_EVISION
 using Euresys.Open_eVision;
 using InvoiceEye.Core.Vision;
-using SixLabors.ImageSharp;
-using SixLabors.ImageSharp.PixelFormats;
-using SixLabors.ImageSharp.Processing;
+using SkiaSharp;
 using System.Reflection;
 using CoreRect = InvoiceEye.Core.Vision.Rect;
 using EasyBarCode2 = Euresys.Open_eVision.EasyBarCode2;
@@ -80,18 +78,31 @@ public sealed class OpenEVisionEngine : IVisionEngine
 
     public IVisionImage Load(Stream imageStream)
     {
-        // 先用 ImageSharp 依 EXIF 轉正、縮到長邊 2400 px 並存成 PNG，再交給 Open eVision 載入
+        // 先用 SkiaSharp 依 EXIF 轉正、縮到長邊 2400 px 並存成 PNG，再交給 Open eVision 載入
         var temp = Path.Combine(Path.GetTempPath(), $"invoiceeye_{Guid.NewGuid():N}.png");
-        using (var img = SixLabors.ImageSharp.Image.Load<Rgb24>(imageStream))
+        using (var managed = new SKManagedStream(imageStream))
+        using (var codec = SKCodec.Create(managed) ?? throw new InvalidDataException("無法解讀這張照片的格式"))
         {
-            img.Mutate(x => x.AutoOrient());
-            var longSide = Math.Max(img.Width, img.Height);
-            if (longSide > 2400)
+            var bmp = SKBitmap.Decode(codec) ?? throw new InvalidDataException("無法解碼這張照片");
+            try
             {
-                var scale = 2400.0 / longSide;
-                img.Mutate(x => x.Resize((int)(img.Width * scale), (int)(img.Height * scale)));
+                bmp = ReplaceWith(bmp, AutoOrient(bmp, codec.EncodedOrigin));
+                var longSide = Math.Max(bmp.Width, bmp.Height);
+                if (longSide > 2400)
+                {
+                    var scale = 2400.0 / longSide;
+                    var size = new SKImageInfo((int)(bmp.Width * scale), (int)(bmp.Height * scale));
+                    bmp = ReplaceWith(bmp, bmp.Resize(size, new SKSamplingOptions(SKCubicResampler.Mitchell))
+                        ?? throw new InvalidOperationException("縮小照片失敗"));
+                }
+                using var png = bmp.Encode(SKEncodedImageFormat.Png, 100);
+                using var file = File.Create(temp);
+                png.SaveTo(file);
             }
-            img.SaveAsPng(temp);
+            finally
+            {
+                bmp.Dispose();
+            }
         }
 
         var color = new EImageC24();
@@ -101,6 +112,41 @@ public sealed class OpenEVisionEngine : IVisionEngine
         // 熱感紙常偏淡：把灰階拉到全範圍增加對比（失敗就略過）
         TryRun("EasyImage.Normalize", () => CallStatic(typeof(EasyImage), "Normalize", gray, gray));
         return new Image { Color = color, Gray = gray, TempFile = temp };
+    }
+
+    /// <summary>換成新的點陣圖並釋放舊的（兩者相同時不釋放）。</summary>
+    private static SKBitmap ReplaceWith(SKBitmap old, SKBitmap replacement)
+    {
+        if (!ReferenceEquals(old, replacement)) old.Dispose();
+        return replacement;
+    }
+
+    /// <summary>依 EXIF 方向把照片轉正；已經是正的就回傳原本的點陣圖。</summary>
+    private static SKBitmap AutoOrient(SKBitmap src, SKEncodedOrigin origin)
+    {
+        if (origin == SKEncodedOrigin.TopLeft) return src;
+        float w = src.Width, h = src.Height;
+        var swap = origin is SKEncodedOrigin.LeftTop or SKEncodedOrigin.RightTop
+            or SKEncodedOrigin.RightBottom or SKEncodedOrigin.LeftBottom;
+        // 每種方向對應的轉換：x' = ScaleX·x + SkewX·y + TransX，y' = SkewY·x + ScaleY·y + TransY
+        var m = origin switch
+        {
+            SKEncodedOrigin.TopRight => new SKMatrix(-1, 0, w, 0, 1, 0, 0, 0, 1),     // 左右翻轉
+            SKEncodedOrigin.BottomRight => new SKMatrix(-1, 0, w, 0, -1, h, 0, 0, 1), // 轉 180°
+            SKEncodedOrigin.BottomLeft => new SKMatrix(1, 0, 0, 0, -1, h, 0, 0, 1),   // 上下翻轉
+            SKEncodedOrigin.LeftTop => new SKMatrix(0, 1, 0, 1, 0, 0, 0, 0, 1),       // 沿主對角線翻轉
+            SKEncodedOrigin.RightTop => new SKMatrix(0, -1, h, 1, 0, 0, 0, 0, 1),     // 順時針 90°
+            SKEncodedOrigin.RightBottom => new SKMatrix(0, -1, h, -1, 0, w, 0, 0, 1), // 沿副對角線翻轉
+            SKEncodedOrigin.LeftBottom => new SKMatrix(0, 1, 0, -1, 0, w, 0, 0, 1),   // 逆時針 90°
+            _ => SKMatrix.Identity,
+        };
+        var dst = new SKBitmap(new SKImageInfo(swap ? src.Height : src.Width, swap ? src.Width : src.Height, src.ColorType, src.AlphaType));
+        using var canvas = new SKCanvas(dst);
+        canvas.SetMatrix(m);
+        using var image = SKImage.FromBitmap(src);
+        // 方向轉換都是整數像素對應，用最近鄰取樣就不會糊掉
+        canvas.DrawImage(image, 0, 0, new SKSamplingOptions(SKFilterMode.Nearest));
+        return dst;
     }
 
     // ───────── QR Code（EasyQRCode）─────────
@@ -282,38 +328,42 @@ public sealed class OpenEVisionEngine : IVisionEngine
         return mask;
     }
 
+    /// <summary>把影像檔解碼成指定的像素格式（灰階 Gray8 或 RGBA8888）。</summary>
+    private static SKBitmap DecodeAs(string file, SKColorType colorType)
+    {
+        using var codec = SKCodec.Create(file) ?? throw new InvalidDataException($"無法讀取影像 {file}");
+        var info = new SKImageInfo(codec.Info.Width, codec.Info.Height, colorType, SKAlphaType.Opaque);
+        return SKBitmap.Decode(codec, info) ?? throw new InvalidDataException($"無法解碼影像 {file}");
+    }
+
     private static byte[,] ReadGray(string file, int width, int height)
     {
-        using var img = SixLabors.ImageSharp.Image.Load<L8>(file);
+        using var bmp = DecodeAs(file, SKColorType.Gray8);
+        var pixels = bmp.GetPixelSpan();
         var result = new byte[width, height];
-        img.ProcessPixelRows(rows =>
+        for (var y = 0; y < Math.Min(height, bmp.Height); y++)
         {
-            for (var y = 0; y < Math.Min(height, rows.Height); y++)
-            {
-                var row = rows.GetRowSpan(y);
-                for (var x = 0; x < Math.Min(width, row.Length); x++) result[x, y] = row[x].PackedValue;
-            }
-        });
+            var row = pixels.Slice(y * bmp.RowBytes, bmp.Width);
+            for (var x = 0; x < Math.Min(width, bmp.Width); x++) result[x, y] = row[x];
+        }
         return result;
     }
 
     /// <summary>備用做法：直接讀像素判斷紅色（R 明顯大於 G、B）。</summary>
     private static bool[,] RedMaskFromPixels(string file, int width, int height)
     {
-        using var img = SixLabors.ImageSharp.Image.Load<Rgb24>(file);
+        using var bmp = DecodeAs(file, SKColorType.Rgba8888);
+        var pixels = bmp.GetPixelSpan();
         var mask = new bool[width, height];
-        img.ProcessPixelRows(rows =>
+        for (var y = 0; y < Math.Min(height, bmp.Height); y++)
         {
-            for (var y = 0; y < Math.Min(height, rows.Height); y++)
+            var row = pixels.Slice(y * bmp.RowBytes, bmp.Width * 4);
+            for (var x = 0; x < Math.Min(width, bmp.Width); x++)
             {
-                var row = rows.GetRowSpan(y);
-                for (var x = 0; x < Math.Min(width, row.Length); x++)
-                {
-                    var p = row[x];
-                    mask[x, y] = p.R > 110 && p.R > p.G * 1.5 && p.R > p.B * 1.4;
-                }
+                int r = row[x * 4], g = row[x * 4 + 1], b = row[x * 4 + 2];
+                mask[x, y] = r > 110 && r > g * 1.5 && r > b * 1.4;
             }
-        });
+        }
         return mask;
     }
 
