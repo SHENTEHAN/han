@@ -6,6 +6,7 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using System.Reflection;
 using CoreRect = InvoiceEye.Core.Vision.Rect;
+using EasyBarCode2 = Euresys.Open_eVision.EasyBarCode2;
 
 namespace InvoiceEye.Api;
 
@@ -13,7 +14,7 @@ namespace InvoiceEye.Api;
 /// 用 Euresys Open eVision 實作的影像引擎。
 ///
 /// ⚠ 這個檔案是依 Open eVision 官方文件的片段寫成，開發時的環境沒有 Open eVision 可以編譯測試。
-///   類別名稱（EImageC24、EImageBW8、EROIBW8、EasyImage、EQRCodeReader、EBarCode、EMatcher、EOCR2、
+///   類別名稱（EImageC24、EImageBW8、EROIBW8、EasyImage、EQRCodeReader、EBarCodeReader、EMatcher、EOCR2、
 ///   EImageEncoder、ECodedImage2、EObjectSelection、EColorLookup、EasyColor）文件上都有；
 ///   但部分成員名稱各版本不同，所以那些呼叫用 dynamic 寫，名稱不對時只會在執行時記錄錯誤、
 ///   改走備用做法，不會讓整個程式編譯失敗。第一次在 Windows 執行時請看主控台的錯誤訊息，
@@ -152,17 +153,26 @@ public sealed class OpenEVisionEngine : IVisionEngine
         }
     }
 
-    // ───────── 一維條碼（EasyBarCode）─────────
+    // ───────── 一維條碼（EasyBarCode2）─────────
+
+    private EasyBarCode2.EBarCodeReader? _barcodeReader;
 
     public IReadOnlyList<string> ReadBarcodes(IVisionImage image)
     {
         var img = (Image)image;
         try
         {
-            // EBarCode 預設啟用的標準條碼種類包含 Code 39
-            dynamic reader = new EBarCode();
-            string text = reader.Read(img.Gray);
-            return string.IsNullOrWhiteSpace(text) ? Array.Empty<string>() : new[] { text.Trim() };
+            if (_barcodeReader is null)
+            {
+                // 電子發票證明聯的一維條碼是 Code 39，只啟用這一種，讀得比較快也比較不會誤判
+                _barcodeReader = new EasyBarCode2.EBarCodeReader();
+                _barcodeReader.DisableAllSymbologies();
+                _barcodeReader.EnableSymbology(EasyBarCode2.EBarCodeSymbologies.Code39);
+            }
+            return _barcodeReader.Read(img.Gray)
+                .Select(code => code.GetDecodedString().Trim())
+                .Where(text => text.Length > 0)
+                .ToArray();
         }
         catch (Exception ex)
         {
