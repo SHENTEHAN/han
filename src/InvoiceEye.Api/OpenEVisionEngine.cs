@@ -220,6 +220,8 @@ public sealed class OpenEVisionEngine : IVisionEngine
 
     // ───────── 一維條碼（EasyBarCode2）─────────
 
+    // 同一個 Open eVision 物件不能給多個執行緒同時用，所以共用的讀取器都用鎖保護（多張照片同時上傳時）
+    private readonly object _barcodeLock = new();
     private EasyBarCode2.EBarCodeReader? _barcodeReader;
 
     public IReadOnlyList<string> ReadBarcodes(IVisionImage image)
@@ -227,17 +229,21 @@ public sealed class OpenEVisionEngine : IVisionEngine
         var img = (Image)image;
         try
         {
-            if (_barcodeReader is null)
+            lock (_barcodeLock)
             {
-                // 電子發票證明聯的一維條碼是 Code 39，只啟用這一種，讀得比較快也比較不會誤判
-                _barcodeReader = new EasyBarCode2.EBarCodeReader();
-                _barcodeReader.DisableAllSymbologies();
-                _barcodeReader.EnableSymbology(EasyBarCode2.EBarCodeSymbologies.Code39);
+                if (_barcodeReader is null)
+                {
+                    // 電子發票證明聯的一維條碼是 Code 39，只啟用這一種，讀得比較快也比較不會誤判
+                    var reader = new EasyBarCode2.EBarCodeReader();
+                    reader.DisableAllSymbologies();
+                    reader.EnableSymbology(EasyBarCode2.EBarCodeSymbologies.Code39);
+                    _barcodeReader = reader;
+                }
+                return _barcodeReader.Read(img.Gray)
+                    .Select(code => code.GetDecodedString().Trim())
+                    .Where(text => text.Length > 0)
+                    .ToArray();
             }
-            return _barcodeReader.Read(img.Gray)
-                .Select(code => code.GetDecodedString().Trim())
-                .Where(text => text.Length > 0)
-                .ToArray();
         }
         catch (Exception ex)
         {
@@ -423,49 +429,51 @@ public sealed class OpenEVisionEngine : IVisionEngine
         var img = (Image)image;
         try
         {
-            if (!_matchers.TryGetValue(kind, out var m))
+            // 範本快取（Dictionary）和 EMatcher 都是共用的，整段用同一把鎖
+            lock (_matchers)
             {
-                var path = _templatePaths[kind];
-                if (!File.Exists(path))
+                if (!_matchers.TryGetValue(kind, out var m))
                 {
-                    // 和 EasyOCR2 模型一樣，範本是選用的（vision/README.md）：沒有時只提示一次，不每張照片都警告
-                    bool firstTime;
-                    lock (_missingTemplatesLogged) firstTime = _missingTemplatesLogged.Add(kind);
-                    if (firstTime)
-                        _log.LogInformation("沒有範本圖檔 {Path}，這個步驟會跳過（做法見 vision/README.md）", path);
-                    return null;
+                    var path = _templatePaths[kind];
+                    if (!File.Exists(path))
+                    {
+                        // 和 EasyOCR2 模型一樣，範本是選用的（vision/README.md）：沒有時只提示一次，不每張照片都警告
+                        if (_missingTemplatesLogged.Add(kind))
+                            _log.LogInformation("沒有範本圖檔 {Path}，這個步驟會跳過（做法見 vision/README.md）", path);
+                        return null;
+                    }
+                    var color = new EImageC24();
+                    color.Load(path);
+                    var pattern = new EImageBW8(color.Width, color.Height);
+                    EasyImage.Convert(color, pattern);
+                    var matcher = new EMatcher();
+                    matcher.LearnPattern(pattern);
+                    matcher.MinAngle = -10f;
+                    matcher.MaxAngle = 10f;
+                    matcher.MinScale = 0.6f;
+                    matcher.MaxScale = 1.6f;
+                    matcher.MaxPositions = 1;
+                    m = (matcher, color.Width, color.Height);
+                    _matchers[kind] = m;
+                    DisposeQuietly(color);
+                    DisposeQuietly(pattern);
                 }
-                var color = new EImageC24();
-                color.Load(path);
-                var pattern = new EImageBW8(color.Width, color.Height);
-                EasyImage.Convert(color, pattern);
-                var matcher = new EMatcher();
-                matcher.LearnPattern(pattern);
-                matcher.MinAngle = -10f;
-                matcher.MaxAngle = 10f;
-                matcher.MinScale = 0.6f;
-                matcher.MaxScale = 1.6f;
-                matcher.MaxPositions = 1;
-                m = (matcher, color.Width, color.Height);
-                _matchers[kind] = m;
-                DisposeQuietly(color);
-                DisposeQuietly(pattern);
+
+                var area = searchArea.ClampTo(img.Width, img.Height);
+                var roi = new EROIBW8();
+                roi.Attach(img.Gray);
+                roi.SetPlacement(area.X, area.Y, area.Width, area.Height);
+                // Match 直接回傳結果；找不到時仍可能回傳一筆分數很低（例如 -1）的結果，所以要看分數
+                var found = m.Matcher.Match(roi);
+                if (found.Length == 0 || found[0].Score < 0.6f) return null;
+
+                var pos = found[0];
+                var w = (int)(m.W * pos.Scale);
+                var h = (int)(m.H * pos.Scale);
+                // Center 是相對於 ROI 的中心點（已用 Open eVision 26.6 實測確認）
+                return new CoreRect(area.X + (int)pos.Center.X - w / 2, area.Y + (int)pos.Center.Y - h / 2, w, h)
+                    .ClampTo(img.Width, img.Height);
             }
-
-            var area = searchArea.ClampTo(img.Width, img.Height);
-            var roi = new EROIBW8();
-            roi.Attach(img.Gray);
-            roi.SetPlacement(area.X, area.Y, area.Width, area.Height);
-            // Match 直接回傳結果；找不到時仍可能回傳一筆分數很低（例如 -1）的結果，所以要看分數
-            var found = m.Matcher.Match(roi);
-            if (found.Length == 0 || found[0].Score < 0.6f) return null;
-
-            var pos = found[0];
-            var w = (int)(m.W * pos.Scale);
-            var h = (int)(m.H * pos.Scale);
-            // Center 是相對於 ROI 的中心點（已用 Open eVision 26.6 實測確認）
-            return new CoreRect(area.X + (int)pos.Center.X - w / 2, area.Y + (int)pos.Center.Y - h / 2, w, h)
-                .ClampTo(img.Width, img.Height);
         }
         catch (Exception ex)
         {
@@ -476,6 +484,7 @@ public sealed class OpenEVisionEngine : IVisionEngine
 
     // ───────── 文字辨識（EasyOCR2）─────────
 
+    private readonly object _ocrLock = new();
     private EOCR2? _ocr;
 
     public string? ReadText(IVisionImage image, CoreRect area, OcrField field)
@@ -484,17 +493,23 @@ public sealed class OpenEVisionEngine : IVisionEngine
         var img = (Image)image;
         try
         {
-            if (_ocr is null)
+            string text;
+            // 先設定 Topology 再 Read：兩張照片同時處理時，不鎖住的話會用到別人設定的 Topology
+            lock (_ocrLock)
             {
-                _ocr = new EOCR2();
-                _ocr.Load(_ocrModelPath);
+                if (_ocr is null)
+                {
+                    var ocr = new EOCR2();
+                    ocr.Load(_ocrModelPath); // 載入成功才存起來，失敗時下次會重試
+                    _ocr = ocr;
+                }
+                _ocr.Topology = _topology[field];
+                var a = area.ClampTo(img.Width, img.Height);
+                var roi = new EROIBW8();
+                roi.Attach(img.Gray);
+                roi.SetPlacement(a.X, a.Y, a.Width, a.Height);
+                text = _ocr.Read(roi);
             }
-            _ocr.Topology = _topology[field];
-            var a = area.ClampTo(img.Width, img.Height);
-            var roi = new EROIBW8();
-            roi.Attach(img.Gray);
-            roi.SetPlacement(a.X, a.Y, a.Width, a.Height);
-            string text = _ocr.Read(roi);
             _log.LogInformation("EasyOCR2 {Field}: {Text}", field, text);
             return text;
         }
