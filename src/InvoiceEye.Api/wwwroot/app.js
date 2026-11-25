@@ -197,7 +197,8 @@ async function shrink(file, maxSide = 2000) {
   try {
     const bmp = await createImageBitmap(file);
     const scale = Math.min(1, maxSide / Math.max(bmp.width, bmp.height));
-    if (scale === 1 && file.size < 2.5e6) return file;
+    // 小張的 JPEG／PNG 直接上傳；其他格式（例如 iPhone 的 HEIC）一律轉成 JPEG，電腦端才讀得到
+    if (scale === 1 && file.size < 2.5e6 && /^image\/(jpeg|png)$/.test(file.type)) return file;
     const canvas = document.createElement("canvas");
     canvas.width = Math.round(bmp.width * scale); canvas.height = Math.round(bmp.height * scale);
     canvas.getContext("2d").drawImage(bmp, 0, 0, canvas.width, canvas.height);

@@ -49,6 +49,17 @@
 3. 第一次執行時，Windows 防火牆若詢問，請允許「私人網路」。
 4. 用瀏覽器選單「加到主畫面」，之後就像 App 一樣打開。
 
+### iPhone
+1. 用 **Safari** 打開 `http://<電腦IP>:5080`。
+2. 點下方的「分享」按鈕 →「加入主畫面」→「加入」，主畫面就會出現「恭喜發財」圖示。
+3. 「拍照」會直接開啟相機；「從相簿匯入」選 HEIC 照片也可以，App 會先轉成 JPEG 再上傳。
+4. 即時掃描需要 HTTPS（見下一節）。iPhone 上最簡單的做法是用 Cloudflare 的免費通道取得正式憑證的網址：
+   ```powershell
+   cloudflared tunnel --url http://localhost:5080
+   ```
+   會得到一個 `https://xxxx.trycloudflare.com` 網址，iPhone 用這個網址打開即可使用鏡頭；手機用行動網路也連得到。
+   注意：這個網址任何人都打得開，而 App 沒有登入功能，只在展示時開啟，用完就關掉（Ctrl+C）。
+
 ### 即時掃描（需要 HTTPS）
 手機瀏覽器只允許 HTTPS 網頁使用鏡頭串流。執行 `dotnet dev-certs https` 後用 `dotnet run --launch-profile https`，手機改開 `https://<電腦IP>:5443`，出現憑證警告時選擇繼續。沒有 HTTPS 時「拍照」與「從相簿匯入」照常可用。
 
