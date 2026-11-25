@@ -2,7 +2,6 @@
 using Euresys.Open_eVision;
 using InvoiceEye.Core.Vision;
 using SkiaSharp;
-using System.Reflection;
 using CoreRect = InvoiceEye.Core.Vision.Rect;
 using EasyBarCode2 = Euresys.Open_eVision.EasyBarCode2;
 
@@ -11,12 +10,8 @@ namespace InvoiceEye.Api;
 /// <summary>
 /// 用 Euresys Open eVision 實作的影像引擎。
 ///
-/// ⚠ 這個檔案是依 Open eVision 官方文件的片段寫成，開發時的環境沒有 Open eVision 可以編譯測試。
-///   類別名稱（EImageC24、EImageBW8、EROIBW8、EasyImage、EQRCodeReader、EBarCodeReader、EMatcher、EOCR2、
-///   EImageEncoder、ECodedImage2、EObjectSelection、EColorLookup、EasyColor）文件上都有；
-///   但部分成員名稱各版本不同，所以那些呼叫用 dynamic 寫，名稱不對時只會在執行時記錄錯誤、
-///   改走備用做法，不會讓整個程式編譯失敗。第一次在 Windows 執行時請看主控台的錯誤訊息，
-///   依你安裝的 Open eVision 版本調整。
+/// 所有 Open eVision 呼叫都用實際型別寫成，並已對照 Open eVision 26.6 的 Open_eVision_NetApi.dll 檢查過。
+/// 換成其他版本時如果成員名稱或參數不同，會在建置時就出現編譯錯誤，而不是執行時才默默失敗。
 /// </summary>
 public sealed class OpenEVisionEngine : IVisionEngine
 {
@@ -25,6 +20,7 @@ public sealed class OpenEVisionEngine : IVisionEngine
     private readonly Dictionary<OcrField, string> _topology;
     private readonly Dictionary<TemplateKind, string> _templatePaths;
     private readonly Dictionary<TemplateKind, (EMatcher Matcher, int W, int H)> _matchers = new();
+    private readonly HashSet<TemplateKind> _missingTemplatesLogged = new();
 
     public OpenEVisionEngine(IConfiguration config, ILogger log)
     {
@@ -122,8 +118,19 @@ public sealed class OpenEVisionEngine : IVisionEngine
         var gray = new EImageBW8(color.Width, color.Height);
         EasyImage.Convert(color, gray);
         // 熱感紙常偏淡：把灰階拉到全範圍增加對比（失敗就略過）
-        TryRun("EasyImage.Normalize", () => CallStatic(typeof(EasyImage), "Normalize", gray, gray));
+        TryRun("拉高灰階對比", () => StretchContrast(gray));
         return new Image { Color = color, Gray = gray, TempFile = temp };
+    }
+
+    /// <summary>把灰階的最暗～最亮線性拉到 0～255（已經接近全範圍時不動）。</summary>
+    private static void StretchContrast(EImageBW8 gray)
+    {
+        EasyImage.PixelMin(gray, out EBW8 min);
+        EasyImage.PixelMax(gray, out EBW8 max);
+        int lo = min.Value, hi = max.Value;
+        if (hi - lo < 8 || hi - lo >= 240) return; // 幾乎全白／全黑，或已經夠清楚
+        var gain = 255f / (hi - lo);
+        EasyImage.GainOffset(gray, gray, gain, -lo * gain);
     }
 
     /// <summary>換成新的點陣圖並釋放舊的（兩者相同時不釋放）。</summary>
@@ -189,10 +196,9 @@ public sealed class OpenEVisionEngine : IVisionEngine
         // 優先取原始位元組（Big5 品名才能正確解碼）
         try
         {
-            dynamic stream = ((dynamic)code).GetDecodedStream();
             var all = new List<byte>();
-            foreach (dynamic part in stream.DecodedStreamParts)
-                all.AddRange((byte[])part.DecodedData);
+            foreach (var part in code.DecodedStream.DecodedStreamParts)
+                all.AddRange(part.DecodedData);
             if (all.Count > 0) return all.ToArray();
         }
         catch (Exception ex)
@@ -201,7 +207,8 @@ public sealed class OpenEVisionEngine : IVisionEngine
         }
         try
         {
-            string s = code.GetDecodedString();
+            // 不指定模式的 GetDecodedString() 遇到位元組模式（Big5）會丟例外，所以指定 Auto
+            string s = code.GetDecodedString(EByteInterpretationMode.Auto);
             return System.Text.Encoding.UTF8.GetBytes(s);
         }
         catch (Exception ex)
@@ -247,17 +254,14 @@ public sealed class OpenEVisionEngine : IVisionEngine
         try
         {
             var bin = new EImageBW8(img.Width, img.Height);
-            CallStatic(typeof(EasyImage), "Threshold", img.Gray, bin); // 不給門檻值時用自動門檻（Minimum Residue）
+            EasyImage.Threshold(img.Gray, bin); // 不給門檻值時用自動門檻（Minimum Residue）
 
             var encoder = new EImageEncoder();
-            TryRun("設定只編碼白色物件", () =>
-            {
-                dynamic seg = ((dynamic)encoder).GrayscaleSingleThresholdSegmenter;
-                seg.WhiteLayerEncoded = true;
-                seg.BlackLayerEncoded = false;
-            });
+            var seg = encoder.GrayscaleSingleThresholdSegmenter; // 只編碼白色物件（紙張）
+            seg.WhiteLayerEncoded = true;
+            seg.BlackLayerEncoded = false;
             var coded = new ECodedImage2();
-            ((dynamic)encoder).Encode(bin, coded);
+            encoder.Encode(bin, coded);
 
             var selection = new EObjectSelection();
             selection.AddObjects(coded);
@@ -265,7 +269,7 @@ public sealed class OpenEVisionEngine : IVisionEngine
             selection.RemoveUsingUnsignedIntegerFeature(EFeature.Area, minArea, ESingleThresholdMode.Less);
 
             CoreRect? best = null;
-            // ElementCount / GetElement 用 uint（Open eVision 26.6）；用 dynamic 傳 int 會在執行時找不到多載
+            // ElementCount / GetElement 用 uint
             var count = selection.ElementCount;
             for (uint i = 0; i < count; i++)
             {
@@ -319,7 +323,7 @@ public sealed class OpenEVisionEngine : IVisionEngine
             var file = Path.Combine(Path.GetTempPath(), $"invoiceeye_lsh{component}_{Guid.NewGuid():N}.png");
             try
             {
-                ((dynamic)plane).Save(file);
+                plane.Save(file);
                 planes[component] = ReadGray(file, img.Width, img.Height);
             }
             finally
@@ -424,7 +428,11 @@ public sealed class OpenEVisionEngine : IVisionEngine
                 var path = _templatePaths[kind];
                 if (!File.Exists(path))
                 {
-                    _log.LogWarning("找不到範本圖檔 {Path}（請從發票照片裁下「總計」字樣存成這個檔案）", path);
+                    // 和 EasyOCR2 模型一樣，範本是選用的（vision/README.md）：沒有時只提示一次，不每張照片都警告
+                    bool firstTime;
+                    lock (_missingTemplatesLogged) firstTime = _missingTemplatesLogged.Add(kind);
+                    if (firstTime)
+                        _log.LogInformation("沒有範本圖檔 {Path}，這個步驟會跳過（做法見 vision/README.md）", path);
                     return null;
                 }
                 var color = new EImageC24();
@@ -432,13 +440,12 @@ public sealed class OpenEVisionEngine : IVisionEngine
                 var pattern = new EImageBW8(color.Width, color.Height);
                 EasyImage.Convert(color, pattern);
                 var matcher = new EMatcher();
-                ((dynamic)matcher).LearnPattern(pattern);
-                TryRun("設定比對角度與縮放", () =>
-                {
-                    dynamic d = matcher;
-                    d.MinAngle = -10f; d.MaxAngle = 10f;
-                    d.MinScale = 0.6f; d.MaxScale = 1.6f;
-                });
+                matcher.LearnPattern(pattern);
+                matcher.MinAngle = -10f;
+                matcher.MaxAngle = 10f;
+                matcher.MinScale = 0.6f;
+                matcher.MaxScale = 1.6f;
+                matcher.MaxPositions = 1;
                 m = (matcher, color.Width, color.Height);
                 _matchers[kind] = m;
                 DisposeQuietly(color);
@@ -449,18 +456,15 @@ public sealed class OpenEVisionEngine : IVisionEngine
             var roi = new EROIBW8();
             roi.Attach(img.Gray);
             roi.SetPlacement(area.X, area.Y, area.Width, area.Height);
-            dynamic dm = m.Matcher;
-            dm.Match(roi);
-            if ((int)dm.NumPositions < 1) return null;
+            // Match 直接回傳結果；找不到時仍可能回傳一筆分數很低（例如 -1）的結果，所以要看分數
+            var found = m.Matcher.Match(roi);
+            if (found.Length == 0 || found[0].Score < 0.6f) return null;
 
-            dynamic pos = dm.GetPosition(0);
-            if ((float)pos.Score < 0.6f) return null;
-            float scale = 1f;
-            TryRun("讀取比對縮放", () => scale = (float)pos.Scale);
-            var w = (int)(m.W * scale);
-            var h = (int)(m.H * scale);
-            // 位置是相對於 ROI 的中心點
-            return new CoreRect(area.X + (int)(float)pos.CenterX - w / 2, area.Y + (int)(float)pos.CenterY - h / 2, w, h)
+            var pos = found[0];
+            var w = (int)(m.W * pos.Scale);
+            var h = (int)(m.H * pos.Scale);
+            // Center 是相對於 ROI 的中心點（已用 Open eVision 26.6 實測確認）
+            return new CoreRect(area.X + (int)pos.Center.X - w / 2, area.Y + (int)pos.Center.Y - h / 2, w, h)
                 .ClampTo(img.Width, img.Height);
         }
         catch (Exception ex)
@@ -502,12 +506,6 @@ public sealed class OpenEVisionEngine : IVisionEngine
     }
 
     // ───────── 共用工具 ─────────
-
-    /// <summary>用反射呼叫靜態方法：成員名稱或參數各版本不同時，錯誤只會在執行時出現。</summary>
-    private static object? CallStatic(Type type, string method, params object[] args) =>
-        type.InvokeMember(method,
-            BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Static | BindingFlags.OptionalParamBinding,
-            Type.DefaultBinder, null, args);
 
     private static void DisposeQuietly(object? o)
     {
