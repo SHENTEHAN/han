@@ -7,3 +7,6 @@ data/
 .vs/
 *.user
 TestResults/
+
+# Six Labors (ImageSharp 4.x) license key: keep out of git
+sixlabors.lic
