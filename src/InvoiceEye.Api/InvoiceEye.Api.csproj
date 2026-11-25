@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>InvoiceEye.Api</RootNamespace>
+  </PropertyGroup>
+
+  <!--
+    Open eVision：
+    建置時傳入 Open_eVision_NetApi.dll 的路徑就會啟用真正的影像辨識，例如
+      dotnet build -p:OpenEVisionDll="C:\Program Files\Euresys\Open eVision\Bin64\Open_eVision_NetApi.dll"
+    也可以直接改下面的 OpenEVisionDll 預設值。沒有提供（或檔案不存在）時用示範模式。
+  -->
+  <PropertyGroup>
+    <OpenEVisionDll Condition="'$(OpenEVisionDll)' == ''"></OpenEVisionDll>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(OpenEVisionDll)' != '' And Exists('$(OpenEVisionDll)')">
+    <DefineConstants>$(DefineConstants);OPEN_EVISION</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(OpenEVisionDll)' != '' And Exists('$(OpenEVisionDll)')">
+    <Reference Include="Open_eVision_NetApi">
+      <HintPath>$(OpenEVisionDll)</HintPath>
+    </Reference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\InvoiceEye.Core\InvoiceEye.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="SixLabors.ImageSharp" Version="3.1.7" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="vision\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

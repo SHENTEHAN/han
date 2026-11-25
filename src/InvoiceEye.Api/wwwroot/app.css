@@ -1,0 +1,205 @@
+/* 恭喜發財：手機優先的記帳 App。紅色呼應發票上的紅色預印號碼。 */
+:root {
+  --bg: #f6f6f4;
+  --surface: #ffffff;
+  --surface-2: #f0efec;
+  --line: #e2e0dc;
+  --text: #1f2328;
+  --muted: #646b73;
+  --accent: #c62828;
+  --accent-soft: #fbe9e7;
+  --on-accent: #ffffff;
+  --gold: #b7791f;
+  --gold-soft: #fdf3dc;
+  --good: #1f7a4d;
+  --good-soft: #e3f3ea;
+  --warn: #9a5b00;
+  --warn-soft: #fff1d6;
+  --bar: #2f6f63;
+  --radius: 14px;
+  --shadow: 0 1px 2px rgba(0, 0, 0, .06), 0 4px 14px rgba(0, 0, 0, .05);
+  --font: "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --num: ui-monospace, "SF Mono", "Cascadia Mono", Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141516; --surface: #1e2022; --surface-2: #272a2d; --line: #33373b;
+    --text: #eceef0; --muted: #a2a9b0; --accent: #ef5350; --accent-soft: #3a2223;
+    --on-accent: #ffffff; --gold: #e0b252; --gold-soft: #3a3020; --good: #5cc28c; --good-soft: #1d3329;
+    --warn: #f0b75a; --warn-soft: #3a2f1c; --bar: #5fb3a3; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141516; --surface: #1e2022; --surface-2: #272a2d; --line: #33373b;
+  --text: #eceef0; --muted: #a2a9b0; --accent: #ef5350; --accent-soft: #3a2223;
+  --on-accent: #ffffff; --gold: #e0b252; --gold-soft: #3a3020; --good: #5cc28c; --good-soft: #1d3329;
+  --warn: #f0b75a; --warn-soft: #3a2f1c; --bar: #5fb3a3; color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.5 var(--font);
+  padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  -webkit-tap-highlight-color: transparent;
+}
+[hidden] { display: none !important; }
+button, input, select { font: inherit; color: inherit; }
+h1, h2, h3 { margin: 0; line-height: 1.3; text-wrap: balance; }
+h2 { font-size: 1.15rem; }
+h3 { font-size: 1rem; }
+.num { font-family: var(--num); font-variant-numeric: tabular-nums; }
+
+/* ── 上方標題列 ── */
+.topbar {
+  position: sticky; top: 0; z-index: 5;
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: calc(10px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 10px max(16px, env(safe-area-inset-left, 0px));
+  background: var(--surface); border-bottom: 1px solid var(--line);
+}
+.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1.1rem; letter-spacing: .04em; }
+.engine-badge { font-size: .75rem; padding: 3px 8px; border-radius: 99px; background: var(--warn-soft); color: var(--warn); font-weight: 600; }
+
+main {
+  max-width: 720px; margin: 0 auto;
+  padding: 16px max(16px, env(safe-area-inset-right, 0px)) 24px max(16px, env(safe-area-inset-left, 0px));
+  display: flex; flex-direction: column; gap: 16px;
+}
+
+/* ── 下方分頁列 ── */
+.tabbar {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 5;
+  display: grid; grid-template-columns: repeat(5, 1fr);
+  background: var(--surface); border-top: 1px solid var(--line);
+  padding: 6px max(4px, env(safe-area-inset-right, 0px)) calc(6px + env(safe-area-inset-bottom, 0px)) max(4px, env(safe-area-inset-left, 0px));
+}
+.tab {
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  border: 0; background: none; padding: 6px 2px; font-size: .72rem; color: var(--muted); cursor: pointer; border-radius: 10px;
+}
+.tab svg { width: 24px; height: 24px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tab[aria-current="page"] { color: var(--accent); font-weight: 700; }
+.tab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* ── 卡片與區塊 ── */
+.card { background: var(--surface); border-radius: var(--radius); box-shadow: var(--shadow); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.section-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.muted { color: var(--muted); }
+.small { font-size: .85rem; }
+.row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.spread { justify-content: space-between; }
+.stack { display: flex; flex-direction: column; gap: 8px; }
+
+/* ── 按鈕 ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  min-height: 44px; padding: 10px 16px; border-radius: 12px; border: 1px solid var(--line);
+  background: var(--surface); font-weight: 600; cursor: pointer; text-decoration: none;
+}
+.btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--accent); }
+.btn.danger { color: var(--accent); }
+.btn.small { min-height: 34px; padding: 4px 10px; font-size: .85rem; border-radius: 9px; }
+.btn[disabled] { opacity: .5; cursor: not-allowed; }
+.btn svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.scan-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.scan-actions .btn.big { grid-column: 1 / -1; min-height: 64px; font-size: 1.1rem; }
+
+/* ── 表單 ── */
+label.field { display: flex; flex-direction: column; gap: 4px; font-size: .85rem; color: var(--muted); min-width: 0; }
+.field input, .field select, input.inline, select.inline {
+  min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--text); width: 100%;
+}
+.field input:focus, .field select:focus, input.inline:focus, select.inline:focus { outline: 2px solid var(--accent); outline-offset: 0; border-color: transparent; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.check { display: flex; align-items: center; gap: 8px; font-size: .9rem; }
+.check input { width: 20px; height: 20px; accent-color: var(--accent); }
+
+/* ── 提示 ── */
+.notice { border-radius: 12px; padding: 10px 12px; font-size: .9rem; display: flex; gap: 8px; align-items: flex-start; }
+.notice.warn { background: var(--warn-soft); color: var(--warn); }
+.notice.error { background: var(--accent-soft); color: var(--accent); }
+.notice.good { background: var(--good-soft); color: var(--good); }
+.notice.gold { background: var(--gold-soft); color: var(--gold); }
+.notice ul { margin: 0; padding-left: 1.1em; }
+
+/* ── 發票確認卡 ── */
+.invoice-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.invoice-number { font-family: var(--num); font-size: 1.35rem; font-weight: 700; letter-spacing: .04em; color: var(--accent); }
+.type-chip, .chip { display: inline-block; font-size: .75rem; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--surface-2); color: var(--muted); white-space: nowrap; }
+.chip.invoice { background: var(--accent-soft); color: var(--accent); }
+.chip.fixed { background: #e4ecf7; color: #2f5d8a; }
+.chip.manual { background: var(--surface-2); color: var(--muted); }
+.chip.lottery { background: var(--gold-soft); color: var(--gold); }
+:root[data-theme="dark"] .chip.fixed { background: #1f2a38; color: #8fb4dd; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .chip.fixed { background: #1f2a38; color: #8fb4dd; } }
+
+.lines { display: flex; flex-direction: column; gap: 10px; }
+.line { display: grid; grid-template-columns: 1fr auto; gap: 6px 10px; align-items: center; padding: 10px; border-radius: 12px; background: var(--surface-2); }
+.line .name { min-width: 0; overflow-wrap: anywhere; }
+.line .amount { font-family: var(--num); font-weight: 600; text-align: right; }
+.line .cat-picker { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; }
+.cat-btn { min-height: 34px; padding: 4px 12px; border-radius: 99px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; font-size: .9rem; }
+.cat-btn[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); font-weight: 600; }
+.cat-btn.add { border-style: dashed; color: var(--accent); }
+.line.unset { outline: 2px dashed var(--accent); outline-offset: -2px; }
+.source-note { grid-column: 1 / -1; font-size: .75rem; color: var(--muted); }
+
+/* ── 清單 ── */
+.list { display: flex; flex-direction: column; }
+.list-item { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 12px 0; border-bottom: 1px solid var(--line); align-items: center; }
+.list-item:last-child { border-bottom: 0; }
+.list-item .title { font-weight: 600; min-width: 0; overflow-wrap: anywhere; }
+.list-item .sub { font-size: .8rem; color: var(--muted); min-width: 0; overflow-wrap: anywhere; }
+.list-item .value { font-family: var(--num); font-weight: 700; text-align: right; }
+.value.expense { color: var(--text); }
+.value.income { color: var(--good); }
+.date-group { font-size: .8rem; font-weight: 700; color: var(--muted); padding-top: 10px; }
+
+/* ── 月份切換、總覽 ── */
+.month-switch { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.month-switch strong { font-size: 1.1rem; }
+.summary { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.summary div { background: var(--surface-2); border-radius: 12px; padding: 10px; min-width: 0; }
+.summary span { display: block; font-size: .75rem; color: var(--muted); }
+.summary b { font-family: var(--num); font-size: 1.05rem; overflow-wrap: anywhere; }
+
+/* ── 報表長條 ── */
+.bar-row { display: grid; grid-template-columns: 4.5em 1fr auto; gap: 10px; align-items: center; font-size: .9rem; }
+.bar-track { position: relative; height: 14px; background: var(--surface-2); border-radius: 7px; overflow: hidden; }
+.bar-fill { position: absolute; inset: 0 auto 0 0; background: var(--bar); border-radius: 7px; }
+.bar-fill.over { background: var(--accent); }
+.bar-budget { position: absolute; top: -2px; bottom: -2px; width: 2px; background: var(--text); opacity: .55; }
+.daily-chart { width: 100%; height: 120px; display: block; }
+
+/* ── 對獎 ── */
+.status { font-size: .8rem; font-weight: 700; padding: 2px 8px; border-radius: 99px; white-space: nowrap; }
+.status.Won { background: var(--gold-soft); color: var(--gold); }
+.status.WonExpired { background: var(--surface-2); color: var(--muted); text-decoration: line-through; }
+.status.NoPrize { background: var(--surface-2); color: var(--muted); }
+.status.NotDrawn, .status.WinningNumbersMissing { background: var(--warn-soft); color: var(--warn); }
+.status.InvalidNumber { background: var(--accent-soft); color: var(--accent); }
+
+/* ── 即時掃描 ── */
+.live { position: relative; border-radius: var(--radius); overflow: hidden; background: #000; aspect-ratio: 3 / 4; max-width: 100%; }
+.live video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.live .frame { position: absolute; inset: 12% 10%; border: 3px solid rgba(255, 255, 255, .85); border-radius: 16px; box-shadow: 0 0 0 999px rgba(0, 0, 0, .35); }
+.live .hint { position: absolute; left: 0; right: 0; bottom: 12px; text-align: center; color: #fff; font-size: .9rem; text-shadow: 0 1px 2px #000; }
+
+/* ── 載入中、Toast ── */
+.spinner { width: 22px; height: 22px; border: 3px solid var(--line); border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.toast {
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(86px + env(safe-area-inset-bottom, 0px)); z-index: 10;
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 12px; font-size: .9rem; max-width: calc(100% - 32px); box-shadow: var(--shadow);
+}
+.empty { text-align: center; color: var(--muted); padding: 20px 8px; }
+.confirm-bar { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
+
+@media (prefers-reduced-motion: reduce) { .spinner { animation-duration: 2s; } }
+@media (max-width: 380px) { .grid-3 { grid-template-columns: 1fr 1fr; } }
