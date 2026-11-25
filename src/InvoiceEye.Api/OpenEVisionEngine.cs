@@ -197,11 +197,11 @@ public sealed class OpenEVisionEngine : IVisionEngine
             selection.RemoveUsingUnsignedIntegerFeature(EFeature.Area, minArea, ESingleThresholdMode.Less);
 
             CoreRect? best = null;
-            dynamic sel = selection;
-            int count = (int)sel.ElementCount;
-            for (var i = 0; i < count; i++)
+            // ElementCount / GetElement 用 uint（Open eVision 26.6）；用 dynamic 傳 int 會在執行時找不到多載
+            var count = selection.ElementCount;
+            for (uint i = 0; i < count; i++)
             {
-                dynamic el = sel.GetElement(i);
+                ECodedElement el = selection.GetElement(i);
                 float cx = el.BoundingBoxCenterX, cy = el.BoundingBoxCenterY;
                 float w = el.BoundingBoxWidth, h = el.BoundingBoxHeight;
                 var r = new CoreRect((int)(cx - w / 2), (int)(cy - h / 2), (int)w, (int)h).ClampTo(img.Width, img.Height);
@@ -241,13 +241,13 @@ public sealed class OpenEVisionEngine : IVisionEngine
     /// </summary>
     private bool[,] RedMaskWithEasyColor(Image img)
     {
-        dynamic lut = new EColorLookup();
-        lut.ConvertFromRgb(OeEnum("EColorSystem", "Lsh"));
+        var lut = new EColorLookup();
+        lut.ConvertFromRgb(EColorSystem.Lsh);
         var planes = new byte[3][,];
         for (var component = 0; component < 3; component++) // LSH：0=亮度 L、1=飽和度 S、2=色相 H
         {
             var plane = new EImageBW8(img.Width, img.Height);
-            CallStatic(typeof(EasyColor), "GetComponent", img.Color, plane, component, lut);
+            EasyColor.GetComponent(img.Color, plane, (uint)component, lut);
             var file = Path.Combine(Path.GetTempPath(), $"invoiceeye_lsh{component}_{Guid.NewGuid():N}.png");
             try
             {
@@ -436,13 +436,6 @@ public sealed class OpenEVisionEngine : IVisionEngine
         type.InvokeMember(method,
             BindingFlags.InvokeMethod | BindingFlags.Public | BindingFlags.Static | BindingFlags.OptionalParamBinding,
             Type.DefaultBinder, null, args);
-
-    private static object OeEnum(string typeName, string value)
-    {
-        var t = typeof(EImageBW8).Assembly.GetType("Euresys.Open_eVision." + typeName)
-                ?? throw new InvalidOperationException($"Open eVision 裡找不到 {typeName}");
-        return Enum.Parse(t, value, ignoreCase: true);
-    }
 
     private static void DisposeQuietly(object? o)
     {
